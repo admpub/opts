@@ -515,7 +515,7 @@ func (n *node) setPkgDefaults() {
 		}
 		if n.repoInfer && n.repo == "" {
 			switch parts[0] {
-			case "github.com", "bitbucket.org":
+			case "github.com", "bitbucket.org", "gitlab.com", "gitee.com", "gitea.com":
 				n.repo = "https://" + strings.Join(parts[0:3], "/")
 			}
 		}
