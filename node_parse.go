@@ -18,8 +18,33 @@ func (n *node) Parse() ParsedOpts {
 	return n.ParseArgs(os.Args)
 }
 
-//ParseArgs with the provided arguments
+//ParseArgs with the provided arguments and os.Exit on
+//any parse failure, or when handling shell completion.
+//Use ParseArgsError if you need to handle failure in
+//your application.
 func (n *node) ParseArgs(args []string) ParsedOpts {
+	o, err := n.ParseArgsError(args)
+	if err != nil {
+		//expected user error, print message as-is
+		if ee, ok := err.(exitError); ok {
+			fmt.Fprint(os.Stderr, string(ee))
+			os.Exit(1)
+		}
+		//expected opts error, print message to programmer
+		if ae, ok := err.(authorError); ok {
+			fmt.Fprintf(os.Stderr, "opts usage error: %s\n", ae)
+			os.Exit(1)
+		}
+		//unexpected exit (1) embed message in help to user
+		fmt.Fprintf(os.Stderr, n.Help())
+		os.Exit(1)
+	}
+	//success
+	return o
+}
+
+//ParseArgsError with the provided arguments
+func (n *node) ParseArgsError(args []string) (ParsedOpts, error) {
 	//shell-completion?
 	if cl := os.Getenv("COMP_LINE"); n.complete && cl != "" {
 		args := strings.Split(cl, " ")
@@ -29,25 +54,17 @@ func (n *node) ParseArgs(args []string) ParsedOpts {
 		}
 		os.Exit(0)
 	}
-	//use built state to perform parse
+	//parse, storing any errors on the node itself
 	if err := n.parse(args); err != nil {
-		//expected exit (0) print message as-is
-		if ee, ok := err.(exitError); ok {
-			fmt.Fprint(os.Stderr, string(ee))
-			os.Exit(0)
+		_, ee := err.(exitError)
+		_, ae := err.(authorError)
+		if !ee && !ae {
+			n.err = err
 		}
-		//unexpected exit (1) print message to programmer
-		if ae, ok := err.(authorError); ok {
-			fmt.Fprintf(os.Stderr, "opts usage error: %s\n", ae)
-			os.Exit(1)
-		}
-		//unexpected exit (1) embed message in help to user
-		n.err = err
-		fmt.Fprintf(os.Stderr, n.Help())
-		os.Exit(1)
+		return n, err
 	}
 	//success
-	return n
+	return n, nil
 }
 
 //parse validates and initialises all internal items
@@ -211,8 +228,18 @@ func (n *node) parse(args []string) error {
 }
 
 func (n *node) addStructFields(group string, sv reflect.Value) error {
+	if sv.Kind() == reflect.Interface {
+		sv = sv.Elem()
+	}
+	if sv.Kind() == reflect.Ptr {
+		sv = sv.Elem()
+	}
 	if sv.Kind() != reflect.Struct {
-		return n.errorf("opts: %s should be a pointer to a struct (got %s)", sv.Type().Name(), sv.Kind())
+		name := ""
+		if sv.IsValid() {
+			name = sv.Type().Name()
+		}
+		return n.errorf("opts: %s should be a pointer to a struct (got %s)", name, sv.Kind())
 	}
 	for i := 0; i < sv.NumField(); i++ {
 		sf := sv.Type().Field(i)
@@ -241,6 +268,8 @@ func (n *node) addStructField(group string, sf reflect.StructField, val reflect.
 }
 
 func (n *node) addKVField(kv *kv, fName, help, mode, group string, val reflect.Value) error {
+	//internal opts flag
+	internal := kv == nil
 	//ignore unaddressed/unexported fields
 	if !val.CanSet() {
 		return nil
@@ -326,7 +355,7 @@ func (n *node) addKVField(kv *kv, fName, help, mode, group string, val reflect.V
 			if set && explicit {
 				return n.errorf("env name '%s' already in use", e)
 			}
-			if !set {
+			if !internal && !set {
 				n.envNames[e] = true
 				i.envName = e
 				i.useEnv = true

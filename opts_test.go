@@ -3,6 +3,7 @@ package opts
 import (
 	"fmt"
 	"io/ioutil"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -398,6 +399,48 @@ func TestDocArgList(t *testing.T) {
 `)
 }
 
+func TestDocBrackets(t *testing.T) {
+	//config
+	type Config struct {
+		Foo string `opts:"help=a message (submessage)"`
+	}
+	c := &Config{
+		Foo: "bar",
+	}
+	//flag example parse
+	o, _ := New(c).Name("docbrackets").ParseArgsError([]string{"/bin/prog", "--help"})
+	check(t, o.Help(), `
+  Usage: docbrackets [options]
+
+  Options:
+  --foo, -f   a message (submessage, default bar)
+  --help, -h  display help
+
+`)
+}
+
+func TestDocUseEnv(t *testing.T) {
+	//config
+	type Config struct {
+		Foo string `opts:"help=a message"`
+	}
+	c := &Config{}
+	//flag example parse
+	o, _ := New(c).UseEnv().Version("1.2.3").Name("docuseenv").ParseArgsError([]string{"/bin/prog", "--help"})
+	check(t, o.Help(), `
+  Usage: docuseenv [options]
+
+  Options:
+  --foo, -f      a message (env FOO)
+  --version, -v  display version
+  --help, -h     display help
+
+  Version:
+    1.2.3
+
+`)
+}
+
 func TestSubCommandMap(t *testing.T) {
 	//config
 	type Config struct {
@@ -408,6 +451,28 @@ func TestSubCommandMap(t *testing.T) {
 		Foo: "foo",
 	}
 	New(&c)
+}
+
+func TestCustomFlags(t *testing.T) {
+	//config
+	type Config struct {
+		Foo *url.URL `opts:"help=my url"`
+		Bar *url.URL `opts:"help=another url"`
+	}
+	c := Config{
+		Foo: &url.URL{},
+	}
+	//flag example parse
+	n := testNew(&c)
+	if err := n.parse([]string{"/bin/prog", "-f", "http://foo.com"}); err != nil {
+		t.Fatal(err)
+	}
+	if c.Foo == nil || c.Foo.String() != "http://foo.com" {
+		t.Fatalf("incorrect foo: %v", c.Foo)
+	}
+	if c.Bar != nil {
+		t.Fatal("bar should be nil")
+	}
 }
 
 var spaces = regexp.MustCompile(`\ `)
